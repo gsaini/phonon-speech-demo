@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phonon speech demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #edf1f6;     /* cool studio grey-blue */
+    --panel: #f8fafc;
+    --ink: #1b2a4a;       /* navy: text and the waveform */
+    --muted: #5b6b85;
+    --line: #c9d3e1;
+    --signal: #d7263d;    /* the record light: playhead, focus, errors */
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #121a2b; --panel: #18233a; --ink: #e3eaf5; --muted: #9aa8bf; --line: #2c3a55; --signal: #ff5c6e;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #121a2b; --panel: #18233a; --ink: #e3eaf5; --muted: #9aa8bf; --line: #2c3a55; --signal: #ff5c6e;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.55 "Bricolage Grotesque", system-ui, sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: clamp(42px, 8vw, 72px); line-height: 1; font-weight: 800; letter-spacing: -1.5px; margin: 0 0 14px; }
+  .lede { color: var(--muted); max-width: 60ch; margin: 0 0 32px; }
+  .desk { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  @media (max-width: 640px) { .desk { padding: 16px 12px; } }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  textarea, select {
+    width: 100%; font: inherit; color: var(--ink); background: var(--paper);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  }
+  textarea { min-height: 120px; resize: vertical; }
+  .row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: end; margin-top: 14px; }
+  @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+  .check { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 0; padding-bottom: 10px; color: var(--muted); }
+  .check input { width: 18px; height: 18px; accent-color: var(--ink); }
+  button {
+    font: 600 17px "Bricolage Grotesque", system-ui, sans-serif; cursor: pointer; border-radius: 8px;
+    border: 1px solid var(--ink); background: var(--ink); color: var(--panel); padding: 10px 22px;
+  }
+  button.quiet { background: transparent; color: var(--ink); border-color: var(--line); padding: 6px 12px; font-weight: 400; font-size: 15px; }
+  button:disabled { opacity: .55; cursor: progress; }
+  :focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+
+  /* the waveform: the one loud thing on the page */
+  .scope { margin-top: 26px; position: relative; }
+  canvas { display: block; width: 100%; height: 150px; }
+  .scope .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+  .scope .empty span { background: var(--panel); padding: 0 10px; }
+  .scope .empty[hidden] { display: none; }  /* display: grid above would otherwise beat [hidden] */
+  .stats { margin: 12px 0 0; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.6em; }
+  .stats strong { color: var(--ink); font-weight: 600; }
+  .error { color: var(--signal); }
+  audio { width: 100%; margin-top: 12px; }
+
+  h2 { font-size: 22px; font-weight: 600; margin: 36px 0 10px; }
+  ol.takes { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  ol.takes li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .take-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .take-meta { color: var(--muted); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .none { color: var(--muted); }
+  footer { margin-top: 36px; color: var(--muted); font-size: 15px; max-width: 70ch; }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Say it out loud</h1>
+  <p class="lede" id="lede">Phonon turns text into speech on this computer, through Ollama. Type something, pick a voice, and press Speak.</p>
+
+  <section class="desk" aria-label="Speak">
+    <label for="text">Text</label>
+    <textarea id="text">Good morning. Here is a short update before your first meeting. Checkout recovered at 14:32 after the rollback, and both refunds of $49.99 went out this morning.</textarea>
+    <div class="row">
+      <div><label for="voice">Voice</label><select id="voice"><option value="">default</option></select></div>
+      <label class="check"><input type="checkbox" id="markdown"> Clean up Markdown</label>
+      <button id="speak">Speak</button>
+    </div>
+    <div class="scope"><canvas id="wave" aria-label="Waveform of the last clip"></canvas><div class="empty" id="empty"><span>The waveform appears here.</span></div></div>
+    <p class="stats" id="stats" role="status"></p>
+    <audio id="player" controls hidden></audio>
+  </section>
+
+  <h2>Takes</h2>
+  <ol class="takes" id="takes"><li class="none">Nothing spoken yet.</li></ol>
+
+  <footer id="footer">Audio stays on this machine. The page talks to a small server on 127.0.0.1, which talks to Ollama.</footer>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const canvas = $("#wave"), player = $("#player");
+let clip = null, takes = [];
+
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+async function loadInfo() {
+  try {
+    const res = await fetch("/api/info");
+    const info = await res.json();
+    if (!res.ok) throw new Error(info.error);
+    const select = $("#voice");
+    select.replaceChildren(...info.voices.map(v => new Option(v, v === "default" ? "" : v)));
+    const zoey = info.voices.find(v => v === "Zoey");
+    if (zoey) select.value = zoey;
+    // ?text=…&voice=… prefills the page, so a phrase can be shared as a link; &go=1 also speaks it
+    const params = new URLSearchParams(location.search);
+    if (params.get("text")) $("#text").value = params.get("text");
+    const wanted = (params.get("voice") || "").toLowerCase();
+    const match = info.voices.find(v => v.toLowerCase() === wanted);
+    if (match) select.value = match === "default" ? "" : match;
+    if (params.get("go") === "1") speak();
+    $("#lede").textContent = `Phonon turns text into speech on this computer, through Ollama. ${info.voices.length} voices are available in ${info.model}. Type something, pick one, and press Speak.`;
+  } catch (e) {
+    $("#stats").innerHTML = "";
+    $("#stats").append(Object.assign(document.createElement("span"), { className: "error", textContent: e.message }));
+  }
+}
+
+async function speak() {
+  const text = $("#text").value.trim();
+  const stats = $("#stats");
+  if (!text) { stats.innerHTML = '<span class="error">Type something to say first.</span>'; return; }
+  const button = $("#speak");
+  button.disabled = true;
+  stats.textContent = "Speaking…";
+  try {
+    const res = await fetch("/api/speak", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, voice: $("#voice").value, markdown: $("#markdown").checked }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `The server answered ${res.status}.`);
+    const blob = await res.blob();
+    const take = {
+      text, voice: $("#voice").value || "default", blob,
+      seconds: +res.headers.get("X-Audio-Seconds"), first: +res.headers.get("X-First-Audio-Ms"),
+      total: +res.headers.get("X-Total-Ms"), requests: +res.headers.get("X-Requests"),
+    };
+    takes.unshift(take);
+    await show(take);
+    renderTakes();
+  } catch (e) {
+    stats.innerHTML = "";
+    stats.append(Object.assign(document.createElement("span"), { className: "error", textContent: e.message }));
+  }
+  button.disabled = false;
+}
+
+async function show(take) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const buffer = await ctx.decodeAudioData(await take.blob.arrayBuffer());
+  ctx.close();
+  clip = buffer.getChannelData(0);
+  $("#empty").hidden = true;
+  draw(0);
+  const faster = take.seconds / (take.total / 1000);
+  const split = take.requests > 1 ? `, in ${take.requests} requests` : "";
+  $("#stats").innerHTML = `<strong>${take.seconds.toFixed(1)} s</strong> of speech, ready in <strong>${(take.total / 1000).toFixed(2)} s</strong>${split}: about <strong>${Math.round(faster)}×</strong> faster than real time. The first audio arrived after ${Math.round(take.first)} ms.`;
+  if (player.src) URL.revokeObjectURL(player.src);
+  player.src = URL.createObjectURL(take.blob);
+  player.hidden = false;
+  player.play().catch(() => {});
+}
+
+function draw(progress) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const g = canvas.getContext("2d");
+  g.scale(dpr, dpr);
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = css("--line");
+  g.fillRect(0, h / 2, w, 1);
+  if (!clip) return;
+  const bar = 3, gap = 1, bars = Math.floor(w / (bar + gap)), per = Math.max(1, Math.floor(clip.length / bars));
+  // loudness per bar (RMS), scaled so the loudest bar fills the height; a sample peak would leave it a third full
+  const levels = new Float32Array(bars);
+  for (let b = 0; b < bars; b++) {
+    let sum = 0;
+    for (let i = b * per; i < (b + 1) * per && i < clip.length; i++) sum += clip[i] * clip[i];
+    levels[b] = Math.sqrt(sum / per);
+  }
+  const loudest = Math.max(...levels) || 1;
+  const ink = css("--ink"), played = css("--signal");
+  for (let b = 0; b < bars; b++) {
+    const height = Math.max(1, (levels[b] / loudest) * h * 0.92);
+    g.fillStyle = b / bars < progress ? played : ink;
+    g.fillRect(b * (bar + gap), (h - height) / 2, bar, height);
+  }
+}
+
+function tick() {
+  if (clip && !player.paused && player.duration) draw(player.currentTime / player.duration);
+  requestAnimationFrame(tick);
+}
+
+function renderTakes() {
+  const list = $("#takes");
+  if (!takes.length) { list.innerHTML = '<li class="none">Nothing spoken yet.</li>'; return; }
+  list.replaceChildren(...takes.map(take => {
+    const li = document.createElement("li");
+    const text = Object.assign(document.createElement("span"), { className: "take-text", textContent: take.text, title: take.text });
+    const meta = Object.assign(document.createElement("span"), { className: "take-meta", textContent: `${take.voice}, ${take.seconds.toFixed(1)} s` });
+    const play = Object.assign(document.createElement("button"), { className: "quiet", textContent: "Play again" });
+    play.addEventListener("click", () => show(take));
+    li.append(text, meta, play);
+    return li;
+  }));
+}
+
+$("#speak").addEventListener("click", speak);
+$("#text").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) speak(); });
+player.addEventListener("ended", () => draw(1));
+window.addEventListener("resize", () => draw(player.duration ? player.currentTime / player.duration : 0));
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => draw(0));
+draw(0);
+requestAnimationFrame(tick);
+loadInfo();
+</script>
+</body>
+</html>
