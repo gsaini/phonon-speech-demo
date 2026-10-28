@@ -120,7 +120,7 @@ def test_web_page_speaks_and_returns_timings(fake):
         with urllib.request.urlopen(base + "/?text=Hello&voice=zoey&go=1") as r:  # a share link
             assert b"Say it out loud" in r.read()
         with urllib.request.urlopen(base + "/api/info") as r:
-            assert json.load(r) == {"model": "phonon", "voices": VOICES}
+            assert json.load(r) == {"model": "phonon", "voices": VOICES, "mine": []}
         request = urllib.request.Request(
             base + "/api/speak",
             data=json.dumps({"text": "**Hello** there.", "voice": "Zoey", "markdown": True}).encode(),
