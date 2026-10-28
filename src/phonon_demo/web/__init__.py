@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from phonon_demo import voices as your_voices
 from phonon_demo.audio import wav_bytes
-from phonon_demo.client import Phonon, PhononError
+from phonon_demo.client import CUSTOM_MODEL, Phonon, PhononError
 from phonon_demo.text import speakable
 
 PAGE = Path(__file__).with_name("index.html")
@@ -44,7 +45,8 @@ def handler_for(phonon: Phonon) -> type[BaseHTTPRequestHandler]:
                 try:
                     if not voices:
                         voices.extend(phonon.voices())
-                    self._json(200, {"model": phonon.model, "voices": voices})
+                    mine = your_voices.mine() if phonon.model == CUSTOM_MODEL else []
+                    self._json(200, {"model": phonon.model, "voices": voices, "mine": mine})
                 except PhononError as exc:
                     self._json(502, {"error": str(exc)})
             else:

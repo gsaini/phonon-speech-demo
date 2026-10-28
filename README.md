@@ -45,6 +45,8 @@ uv run phonon-demo serve                  # the web page above, on 127.0.0.1:876
 | `voices` | the model's voices |
 | `gallery` | one sample per voice into a folder, with an index; `--voices Zoey Easton` for a few, `--format mp3` |
 | `bench` | time to first audio and speed versus real time, cold and warm, for a sentence, a paragraph and a page |
+| `add-voice file --name Me` | adds a Phonon voice file, such as your own voice exported from Gradium Studio; see [Your own voice](#your-own-voice) |
+| `remove-voice Me` | removes it again |
 | `serve` | the web page: type, pick a voice, hear it, see its waveform, replay earlier takes. `/?text=…&voice=Zoey` prefills it, so a phrase can be shared as a link. |
 
 `--model phonon:40m-multilingual` switches any command to the multilingual checkpoint (`ollama pull` it first), and `--host` or `$OLLAMA_HOST` points at another Ollama.
@@ -94,6 +96,27 @@ save(speech.pcm, Path("out.wav"))
 print(f"{speech.seconds:.1f} s of audio, first audio after {speech.first_audio_ms:.0f} ms")
 ```
 
+## Your own voice
+
+A Phonon voice isn't a recording. It is a small speaker embedding, `speaker_wavs`, a 1×512×125 float32 tensor in a 256 KB `.safetensors` file, made by Gradium's speaker encoder from about ten seconds of speech. That encoder isn't in the open weights, so the clone itself is made by Gradium. Everything after that runs on your Mac.
+
+1. **Make the voice in Gradium Studio.** Clone it from a recording of yourself, at least 10 seconds of clear speech, then export it as `.safetensors`. Clone only your own voice, or one whose owner agreed to it. Gradium's REST API can clone a voice too (`POST /api/voices/`), but it only returns an id for Gradium's cloud TTS, with no way to download the file. *The Studio export is reported in [this issue](https://github.com/promptclickrun/bighelp/issues/649); I haven't tried it, since it needs a Gradium account.*
+2. **Add it:**
+
+   ```bash
+   uv run phonon-demo add-voice ~/Downloads/my-voice.safetensors --name Me
+   uv run phonon-demo say "Hello, this is my voice." --voice Me
+   ```
+
+`add-voice` checks the file and keeps a copy in `~/.phonon-demo/voices/`. It then imports a model called `phonon-mine` into Ollama: the open [`gradium/phonon-31m-en`](https://huggingface.co/gradium/phonon-31m-en) checkpoint (Apache 2.0, the same weights as the `phonon` tag), with the 37 built-in English voices and yours beside it. Ollama can't add a voice to a model it already has, so the whole checkpoint is imported each time. The first time downloads about 100 MB and took 34 s here. After that, a rebuild takes under a second.
+
+Once you have a voice of your own, every command and the web page use `phonon-mine`, unless you pass `--model`. Your voices are listed first in the page's picker. `remove-voice` takes one away, and removing the last one deletes `phonon-mine`. To try this without a Gradium account, use any voice from the public pack, [`gradium/phonon-voices`](https://huggingface.co/gradium/phonon-voices): its French, German, Spanish and Portuguese voices aren't in the English model.
+
+```bash
+curl -L -o noemie.safetensors https://huggingface.co/gradium/phonon-voices/resolve/main/voices/FXxJ9mANRq6BCTX5.safetensors
+uv run phonon-demo add-voice noemie.safetensors --name Noémie --yes
+```
+
 ## Things worth knowing
 
 - **Ask for `pcm`, write your own WAV header.** The `wav` stream's header is written before the length is known, so its size fields hold placeholder maximum values. Most players cope; some editors and parsers don't. The client here requests raw PCM and writes a correct header ([audio.py](src/phonon_demo/audio.py)).
@@ -110,10 +133,11 @@ src/phonon_demo/
   text.py        speakable(): Markdown to plain sentences; chunks(): pieces of at most 4,096 characters
   audio.py       WAV with a correct header, .mp3 through ffmpeg, streaming playback through ffplay
   bench.py       cold and warm timings over three lengths of text
-  cli.py         `phonon-demo say | read | voices | gallery | bench | serve`
+  voices.py      your voices: check a voice file, keep it, import the checkpoint with it into Ollama as phonon-mine
+  cli.py         `phonon-demo say | read | voices | add-voice | remove-voice | gallery | bench | serve`
   web/           a standard-library server on 127.0.0.1 and one page; the waveform is drawn from the returned audio
 samples/         eight voices, one sentence each, as MP3
-tests/           20 offline tests against a fake Ollama, so CI needs neither Ollama nor Apple Silicon
+tests/           26 offline tests against a fake Ollama, so CI needs neither Ollama nor Apple Silicon
 ```
 
 ## License

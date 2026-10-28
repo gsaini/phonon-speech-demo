@@ -110,9 +110,19 @@ async function loadInfo() {
     const info = await res.json();
     if (!res.ok) throw new Error(info.error);
     const select = $("#voice");
-    select.replaceChildren(...info.voices.map(v => new Option(v, v === "default" ? "" : v)));
-    const zoey = info.voices.find(v => v === "Zoey");
-    if (zoey) select.value = zoey;
+    const mine = info.voices.filter(v => (info.mine || []).some(m => m.toLowerCase() === v.toLowerCase()));
+    const option = v => new Option(v, v === "default" ? "" : v);
+    if (mine.length) {
+      const yours = Object.assign(document.createElement("optgroup"), { label: "Yours" });
+      const builtIn = Object.assign(document.createElement("optgroup"), { label: "Built in" });
+      yours.append(...mine.map(option));
+      builtIn.append(...info.voices.filter(v => !mine.includes(v)).map(option));
+      select.replaceChildren(yours, builtIn);
+    } else {
+      select.replaceChildren(...info.voices.map(option));
+    }
+    const first = mine[0] || info.voices.find(v => v === "Zoey");
+    if (first) select.value = first;
     // ?text=…&voice=… prefills the page, so a phrase can be shared as a link; &go=1 also speaks it
     const params = new URLSearchParams(location.search);
     if (params.get("text")) $("#text").value = params.get("text");

@@ -11,6 +11,7 @@ breaks (text.py) and spoken as consecutive requests; the audio is joined in orde
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -18,6 +19,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from phonon_demo.text import MAX_INPUT, chunks
@@ -26,6 +28,7 @@ SAMPLE_RATE = 24_000
 SAMPLE_WIDTH = 2  # bytes: 16-bit
 MIN_OLLAMA = (0, 40, 9)
 DEFAULT_MODEL = "phonon"
+CUSTOM_MODEL = "phonon-mine"  # the checkpoint again, with your voices added (voices.py)
 READ_SIZE = 4096
 
 
@@ -74,8 +77,9 @@ class Phonon:
 
     # --- plumbing ------------------------------------------------------------------------------
 
-    def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
-        data = None if body is None else json.dumps(body).encode()
+    def _request(self, method: str, path: str, body: dict[str, Any] | None = None, data: bytes | None = None) -> Any:
+        if body is not None:
+            data = json.dumps(body).encode()
         request = urllib.request.Request(
             self.url + path, data=data, method=method, headers={"content-type": "application/json"}
         )
@@ -94,6 +98,8 @@ class Phonon:
             message = error.get("message", raw) if isinstance(error, dict) else str(error)
         except ValueError:
             message = raw or exc.reason
+        if exc.code == 404 and "not found" in message.lower() and self.model == CUSTOM_MODEL:
+            return f"{message}. Rebuild it from your voice files with `phonon-demo voices --build`."
         if exc.code == 404 and "not found" in message.lower():
             return f"{message}. Pull it with `ollama pull {self.model}`."
         return f"Ollama answered {exc.code}: {message}"
@@ -123,6 +129,26 @@ class Phonon:
 
     def voices(self) -> list[str]:
         return list(self.show().get("voices") or [])
+
+    # --- making models --------------------------------------------------------------------------
+
+    def upload(self, path: Path) -> str:
+        """Copy a file into Ollama's blob store unless it is there already; return its digest."""
+        data = path.read_bytes()
+        digest = "sha256:" + hashlib.sha256(data).hexdigest()
+        try:
+            self._request("HEAD", f"/api/blobs/{digest}").close()
+        except PhononError:
+            self._request("POST", f"/api/blobs/{digest}", data=data).close()
+        return digest
+
+    def create(self, model: str, files: dict[str, Path]) -> None:
+        """Import a checkpoint as `model`; `files` maps each path inside the checkpoint to a local file."""
+        digests = {name: self.upload(path) for name, path in files.items()}
+        self._json("POST", "/api/create", {"model": model, "files": digests, "stream": False})
+
+    def delete(self, model: str) -> None:
+        self._request("DELETE", "/api/delete", {"model": model}).close()
 
     # --- speaking ------------------------------------------------------------------------------
 
